@@ -10,6 +10,9 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import React from "react";
+import { agents } from "@/data/agents";
+import { customerLists } from "@/data/customer-contacts";
+import { campaigns } from "@/data/campaigns";
 
 const segmentLabels: Record<string, string> = {
   agents: "Agents",
@@ -23,67 +26,88 @@ const segmentLabels: Record<string, string> = {
   dashboard: "Dashboard",
 };
 
-function isDynamicSegment(segment: string) {
-  // Skip segments that look like IDs (UUIDs, numeric IDs, etc.)
-  return /^[0-9a-f-]+$/i.test(segment) && segment.length > 3;
+function isKnownSegment(segment: string) {
+  return segment in segmentLabels;
+}
+
+function resolveEntityName(parentSegment: string, id: string): string | null {
+  switch (parentSegment) {
+    case "agents": {
+      const agent = agents.find((a) => a.id === id);
+      return agent?.name ?? null;
+    }
+    case "customers": {
+      const customer = customerLists.find((c) => c.id === id);
+      return customer?.name ?? null;
+    }
+    case "campaigns": {
+      const campaign = campaigns.find((c) => c.id === id);
+      return campaign?.name ?? null;
+    }
+    default:
+      return null;
+  }
+}
+
+interface BreadcrumbEntry {
+  label: string;
+  href: string;
 }
 
 export function DynamicBreadcrumb() {
   const pathname = usePathname();
-
-  // Remove leading slash and split into segments
   const segments = pathname.split("/").filter(Boolean);
 
-  // Build breadcrumb items from segments, skipping dynamic IDs
-  const items = segments
-    .filter((segment) => !isDynamicSegment(segment))
-    .map((segment) => ({
-      label: segmentLabels[segment] || segment,
-      segment,
-    }));
+  // First segment is always the section
+  const section = segments[0];
+  const sectionLabel = section ? segmentLabels[section] : null;
 
-  // Build hrefs for each item
-  const hrefs: string[] = [];
-  let currentPath = "";
-  let itemIndex = 0;
-  for (const segment of segments) {
-    currentPath += `/${segment}`;
-    if (!isDynamicSegment(segment)) {
-      hrefs[itemIndex] = currentPath;
-      itemIndex++;
+  // Determine the second breadcrumb: entity name or known sub-action
+  let secondLabel: string | null = null;
+  if (segments.length >= 2) {
+    const second = segments[1];
+    if (isKnownSegment(second)) {
+      // e.g. /agents/createAgent → "Create Agent"
+      secondLabel = segmentLabels[second];
+    } else if (section) {
+      // Dynamic ID — resolve entity name from the section
+      secondLabel = resolveEntityName(section, second);
     }
+  }
+
+  if (!sectionLabel) {
+    return (
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbPage>Home</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+    );
   }
 
   return (
     <Breadcrumb>
       <BreadcrumbList>
-        {/* Home link always first */}
-        <BreadcrumbItem className="hidden md:block">
-          {items.length === 0 ? (
-            <BreadcrumbPage>Home</BreadcrumbPage>
+        <BreadcrumbItem>
+          {secondLabel ? (
+            <BreadcrumbLink href={`/${section}`}>
+              {sectionLabel}
+            </BreadcrumbLink>
           ) : (
-            <BreadcrumbLink href="/agents">Home</BreadcrumbLink>
+            <BreadcrumbPage>{sectionLabel}</BreadcrumbPage>
           )}
         </BreadcrumbItem>
 
-        {items.map((item, index) => {
-          const isLast = index === items.length - 1;
-
-          return (
-            <React.Fragment key={item.segment + index}>
-              <BreadcrumbSeparator className="hidden md:block" />
-              <BreadcrumbItem className={index === 0 && !isLast ? "hidden md:block" : ""}>
-                {isLast ? (
-                  <BreadcrumbPage>{item.label}</BreadcrumbPage>
-                ) : (
-                  <BreadcrumbLink href={hrefs[index]}>
-                    {item.label}
-                  </BreadcrumbLink>
-                )}
-              </BreadcrumbItem>
-            </React.Fragment>
-          );
-        })}
+        {secondLabel && (
+          <>
+            <BreadcrumbSeparator className="hidden md:block" />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{secondLabel}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </>
+        )}
       </BreadcrumbList>
     </Breadcrumb>
   );
