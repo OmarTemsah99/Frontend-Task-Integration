@@ -45,12 +45,29 @@ import {
   useVoices,
 } from "@/hooks/use-api-data";
 import { Spinner } from "@/components/ui/spinner";
+import { uploadFileFlow } from "@/lib/file-upload";
+import { Check, RefreshCw, Loader2 } from "lucide-react";
 
 interface UploadedFile {
+  tempId: string;
+  id?: string;
   name: string;
   size: number;
   file: File;
+  status: "pending" | "uploading" | "completed" | "error";
+  progress: number;
+  error?: string;
 }
+
+const ACCEPTED_TYPES = [
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".txt",
+  ".csv",
+  ".xlsx",
+  ".xls",
+];
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + " B";
@@ -172,35 +189,79 @@ export function AgentForm({ mode, initialData }: AgentFormProps) {
   ].filter((v) => !v).length;
 
   // File upload handlers
-  const ACCEPTED_TYPES = [
-    ".pdf",
-    ".doc",
-    ".docx",
-    ".txt",
-    ".csv",
-    ".xlsx",
-    ".xls",
-  ];
+  const updateFileStatus = useCallback(
+    (tempId: string, updates: Partial<UploadedFile>) => {
+      setUploadedFiles((prev) =>
+        prev.map((file) =>
+          file.tempId === tempId ? { ...file, ...updates } : file,
+        ),
+      );
+    },
+    [],
+  );
+
+  const uploadFile = useCallback(
+    async (tempId: string, file: File) => {
+      updateFileStatus(tempId, { status: "uploading", progress: 0 });
+
+      try {
+        const id = await uploadFileFlow(file, (progress) => {
+          updateFileStatus(tempId, { progress });
+        });
+        updateFileStatus(tempId, { status: "completed", progress: 100, id });
+      } catch {
+        updateFileStatus(tempId, { status: "error", error: "Upload failed" });
+      }
+    },
+    [updateFileStatus],
+  );
 
   const handleFiles = useCallback(
     (files: FileList | null) => {
       if (!files) return;
+
       const newFiles: UploadedFile[] = [];
+      const filesToUpload: { tempId: string; file: File }[] = [];
+
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const ext = "." + file.name.split(".").pop()?.toLowerCase();
         if (ACCEPTED_TYPES.includes(ext)) {
-          newFiles.push({ name: file.name, size: file.size, file });
+          const tempId = crypto.randomUUID();
+          newFiles.push({
+            tempId,
+            name: file.name,
+            size: file.size,
+            file,
+            status: "pending",
+            progress: 0,
+          });
+          filesToUpload.push({ tempId, file });
         }
       }
+
+      if (newFiles.length === 0) return;
+
       setUploadedFiles((prev) => [...prev, ...newFiles]);
+
+      // Trigger uploads
+      filesToUpload.forEach(({ tempId, file }) => {
+        uploadFile(tempId, file);
+      });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [uploadFile],
   );
 
-  const removeFile = (index: number) => {
-    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+  const retryUpload = (tempId: string) => {
+    const file = uploadedFiles.find((f) => f.tempId === tempId);
+    if (file) {
+      uploadFile(tempId, file.file);
+    }
+  };
+
+  const removeFile = (tempId: string) => {
+    // Local delete only - remove from UI state
+    setUploadedFiles((prev) => prev.filter((f) => f.tempId !== tempId));
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -498,11 +559,12 @@ export function AgentForm({ mode, initialData }: AgentFormProps) {
             <div className="space-y-4">
               {/* Drop zone */}
               <div
-                className={`relative rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
+                className={`relative rounded-lg border-2 border-dashed p-8 text-center transition-colors cursor-pointer ${
                   isDragging
                     ? "border-primary bg-primary/5"
                     : "border-muted-foreground/25"
                 }`}
+                onClick={() => fileInputRef.current?.click()}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}>
@@ -517,12 +579,7 @@ export function AgentForm({ mode, initialData }: AgentFormProps) {
                 <Upload className="mx-auto h-8 w-8 text-muted-foreground" />
                 <p className="mt-2 text-sm font-medium">
                   Drag & drop files here, or{" "}
-                  <button
-                    type="button"
-                    className="text-primary underline"
-                    onClick={() => fileInputRef.current?.click()}>
-                    browse
-                  </button>
+                  <span className="text-primary underline">browse</span>
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Accepted: .pdf, .doc, .docx, .txt, .csv, .xlsx, .xls
@@ -532,24 +589,59 @@ export function AgentForm({ mode, initialData }: AgentFormProps) {
               {/* File list */}
               {uploadedFiles.length > 0 ? (
                 <div className="space-y-2">
-                  {uploadedFiles.map((f, i) => (
+                  {uploadedFiles.map((f) => (
                     <div
-                      key={i}
+                      key={f.tempId}
                       className="flex items-center justify-between rounded-md border px-3 py-2">
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
                         <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <span className="text-sm truncate">{f.name}</span>
-                        <span className="text-xs text-muted-foreground shrink-0">
-                          {formatFileSize(f.size)}
-                        </span>
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <span className="text-sm truncate">{f.name}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground shrink-0">
+                              {formatFileSize(f.size)}
+                            </span>
+                            {f.status === "uploading" && (
+                              <div className="h-1 flex-1 bg-secondary rounded-full overflow-hidden max-w-25">
+                                <div
+                                  className="h-full bg-primary transition-all duration-300"
+                                  style={{ width: `${f.progress}%` }}
+                                />
+                              </div>
+                            )}
+                            {f.status === "error" && (
+                              <span className="text-xs text-destructive">
+                                {f.error}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 shrink-0"
-                        onClick={() => removeFile(i)}>
-                        <X className="h-4 w-4" />
-                      </Button>
+
+                      <div className="flex items-center gap-1">
+                        {f.status === "completed" && (
+                          <Check className="h-4 w-4 text-green-500" />
+                        )}
+                        {f.status === "uploading" && (
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        )}
+                        {f.status === "error" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            onClick={() => retryUpload(f.tempId)}>
+                            <RefreshCw className="h-4 w-4" />
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          onClick={() => removeFile(f.tempId)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
