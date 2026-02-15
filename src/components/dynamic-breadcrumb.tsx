@@ -14,6 +14,7 @@ import React from "react";
 const segmentLabels: Record<string, string> = {
   agents: "Agents",
   createAgent: "Create Agent",
+  editAgent: "Edit Agent",
 };
 
 export function DynamicBreadcrumb() {
@@ -48,9 +49,7 @@ export function DynamicBreadcrumb() {
       <BreadcrumbList>
         <BreadcrumbItem>
           {secondLabel ? (
-            <BreadcrumbLink href={`/${section}`}>
-              {sectionLabel}
-            </BreadcrumbLink>
+            <BreadcrumbLink href={`/${section}`}>{sectionLabel}</BreadcrumbLink>
           ) : (
             <BreadcrumbPage>{sectionLabel}</BreadcrumbPage>
           )}

@@ -29,6 +29,27 @@ export interface Model {
   description: string;
 }
 
+export interface Agent {
+  id: number;
+  name: string;
+  description: string;
+  callType: string;
+  language: string;
+  voice: string;
+  prompt: string;
+  model: string;
+  latency: number;
+  speed: number;
+  callScript: string;
+  serviceDescription: string;
+  attachments: number[];
+  tools: {
+    allowHangUp: boolean;
+    allowCallback: boolean;
+    liveTransfer: boolean;
+  };
+}
+
 // Hook for fetching languages
 export function useLanguages() {
   const [languages, setLanguages] = useState<Language[]>([]);
@@ -155,4 +176,66 @@ export function useModels() {
   }, []);
 
   return { models, loading, error };
+}
+
+// Hook for fetching agents
+export function useAgents() {
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchAgents = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await fetch(`${API_BASE_URL}/agents`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch agents: ${response.statusText}`);
+        }
+        const data = await response.json();
+        setAgents(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to fetch agents");
+        setAgents([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAgents();
+  }, []);
+
+  return { agents, loading, error };
+}
+
+// Hook for fetching agents
+export function useAgentById(id: string) {
+  const [agent, setAgent] = useState<Agent | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchAgentById = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await fetch(`${API_BASE_URL}/agents/${id}`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch agents: ${response.statusText}`);
+        }
+        const data = await response.json();
+        setAgent(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to fetch agents");
+        setAgent(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAgentById();
+  }, [id]);
+
+  return { agent, loading, error };
 }

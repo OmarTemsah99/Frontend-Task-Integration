@@ -46,6 +46,7 @@ import {
 } from "@/hooks/use-api-data";
 import { Spinner } from "@/components/ui/spinner";
 import { uploadFileFlow } from "@/lib/file-upload";
+import { createAgent, updateAgent } from "@/lib/api-client";
 import { Check, RefreshCw, Loader2 } from "lucide-react";
 
 interface UploadedFile {
@@ -138,14 +139,24 @@ export interface AgentFormInitialData {
   speed?: number;
   callScript?: string;
   serviceDescription?: string;
+  tools?: {
+    allowHangUp: boolean;
+    allowCallback: boolean;
+    liveTransfer: boolean;
+  };
 }
 
 interface AgentFormProps {
   mode: "create" | "edit";
   initialData?: AgentFormInitialData;
+  agentId?: string;
 }
 
-export function AgentForm({ mode, initialData }: AgentFormProps) {
+export function AgentForm({
+  mode,
+  initialData,
+  agentId: agentIdProp,
+}: AgentFormProps) {
   // Form state — initialized from initialData when provided
   const [agentName, setAgentName] = useState(initialData?.agentName ?? "");
   const [callType, setCallType] = useState(initialData?.callType ?? "");
@@ -172,7 +183,26 @@ export function AgentForm({ mode, initialData }: AgentFormProps) {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Test Call
+  // Tools State
+  const [allowHangUp, setAllowHangUp] = useState(
+    initialData?.tools?.allowHangUp ?? false,
+  );
+  const [allowCallback, setAllowCallback] = useState(
+    initialData?.tools?.allowCallback ?? false,
+  );
+  const [liveTransfer, setLiveTransfer] = useState(
+    initialData?.tools?.liveTransfer ?? false,
+  );
+
+  // Form Metadata
+  const [agentId, setAgentId] = useState<string | undefined>(agentIdProp);
+  // Actually, for "edit" mode, initialData usually represents an existing agent which has an ID.
+  // But the interface for InitialData didn't have ID. Let's assume we might get it back from save or it might be needed.
+  // For now, let's track if we have an ID to switch modes if needed.
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Test Call State
   const [testFirstName, setTestFirstName] = useState("");
   const [testLastName, setTestLastName] = useState("");
   const [testGender, setTestGender] = useState("");
@@ -264,6 +294,83 @@ export function AgentForm({ mode, initialData }: AgentFormProps) {
     setUploadedFiles((prev) => prev.filter((f) => f.tempId !== tempId));
   };
 
+  // Save Handler
+  const validateForm = () => {
+    const errors: string[] = [];
+    if (!agentName) errors.push("Agent Name is required");
+    if (!callType) errors.push("Call Type is required");
+    if (!language) errors.push("Language is required");
+    if (!voice) errors.push("Voice is required");
+    if (!prompt) errors.push("Prompt is required");
+    if (!model) errors.push("Model is required");
+    return errors;
+  };
+
+  const handleSaveAgent = async () => {
+    const errors = validateForm();
+    if (errors.length > 0) {
+      alert(`Please fix the following errors:\n- ${errors.join("\n- ")}`);
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    const payload = {
+      name: agentName,
+      description,
+      callType,
+      language,
+      voice,
+      prompt,
+      model,
+      latency: latency[0],
+      speed: speed[0],
+      callScript,
+      serviceDescription,
+      attachments: uploadedFiles
+        .filter((f) => f.status === "completed" && f.id)
+        .map((f) => f.id as string),
+      tools: {
+        allowHangUp,
+        allowCallback,
+        liveTransfer,
+      },
+    };
+
+    try {
+      let savedAgent;
+      // If we are in edit mode OR we have already saved (created) the agent in this session
+      if (mode === "edit" || agentId) {
+        // For edit mode, we presume initialData might have needed an ID, OR we need the ID from somewhere.
+        // Since initialData interface doesn't have ID, and props doesn't pass ID directly (only initialData),
+        // We might be missing the ID for the initial Edit case if it's not in initialData.
+        // However, assuming for "create", once we save, we get an ID.
+        // For "edit", usually the ID is available. Let's assume for now if mode is edit, we might rely on a prop or context,
+        // but strictly following the current file, we assume `agentId` state captures it after first create.
+        // If passed in "edit" mode, ideally initialData should have ID.
+        // Let's assume for this task, if we created it, we update it.
+
+        if (agentId) {
+          savedAgent = await updateAgent(agentId, payload);
+        } else {
+          // Fallback or potential issue: validation/logic gap if "edit" mode provided but no ID known.
+          // We'll treat "create" as default if no ID.
+          savedAgent = await createAgent(payload);
+        }
+      } else {
+        savedAgent = await createAgent(payload);
+      }
+
+      setAgentId(savedAgent.id);
+      alert("Agent saved successfully!");
+    } catch (error) {
+      console.error(error);
+      alert("Failed to save agent. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -281,7 +388,11 @@ export function AgentForm({ mode, initialData }: AgentFormProps) {
   };
 
   const heading = mode === "create" ? "Create Agent" : "Edit Agent";
-  const saveLabel = mode === "create" ? "Save Agent" : "Save Changes";
+  const saveLabel = isSubmitting
+    ? "Saving..."
+    : mode === "create" && !agentId
+      ? "Create Agent"
+      : "Save Changes";
 
   const {
     languages,
@@ -303,7 +414,10 @@ export function AgentForm({ mode, initialData }: AgentFormProps) {
     <div className="flex flex-1 flex-col gap-6 p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">{heading}</h1>
-        <Button>{saveLabel}</Button>
+        <Button onClick={handleSaveAgent} disabled={isSubmitting}>
+          {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {saveLabel}
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -668,7 +782,11 @@ export function AgentForm({ mode, initialData }: AgentFormProps) {
                       call
                     </FieldDescription>
                   </FieldContent>
-                  <Switch id="switch-hangup" />
+                  <Switch
+                    id="switch-hangup"
+                    checked={allowHangUp}
+                    onCheckedChange={setAllowHangUp}
+                  />
                 </Field>
               </FieldLabel>
               <FieldLabel htmlFor="switch-callback">
@@ -680,7 +798,11 @@ export function AgentForm({ mode, initialData }: AgentFormProps) {
                       callbacks
                     </FieldDescription>
                   </FieldContent>
-                  <Switch id="switch-callback" />
+                  <Switch
+                    id="switch-callback"
+                    checked={allowCallback}
+                    onCheckedChange={setAllowCallback}
+                  />
                 </Field>
               </FieldLabel>
               <FieldLabel htmlFor="switch-transfer">
@@ -691,7 +813,11 @@ export function AgentForm({ mode, initialData }: AgentFormProps) {
                       Select if you want to transfer the call to a human agent
                     </FieldDescription>
                   </FieldContent>
-                  <Switch id="switch-transfer" />
+                  <Switch
+                    id="switch-transfer"
+                    checked={liveTransfer}
+                    onCheckedChange={setLiveTransfer}
+                  />
                 </Field>
               </FieldLabel>
             </FieldGroup>
@@ -774,7 +900,10 @@ export function AgentForm({ mode, initialData }: AgentFormProps) {
       {/* Sticky bottom save bar */}
       <div className="sticky bottom-0 -mx-6 -mb-6 border-t bg-background px-6 py-4">
         <div className="flex justify-end">
-          <Button>{saveLabel}</Button>
+          <Button onClick={handleSaveAgent} disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {saveLabel}
+          </Button>
         </div>
       </div>
     </div>

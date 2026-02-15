@@ -128,7 +128,28 @@
       "description": "Cost-effective for high volume"
     }
   ],
-  "agents": [],
+  "agents": [
+    {
+      "name": "Test Agent",
+      "description": "Agent for testing",
+      "callType": "inbound",
+      "language": "ar",
+      "voice": "onyx",
+      "prompt": "support",
+      "model": "standard",
+      "latency": 0.5,
+      "speed": 110,
+      "callScript": "testing calls 1 2 3 test test test",
+      "serviceDescription": "testing calls 1 2 3 test test test",
+      "attachments": [],
+      "tools": {
+        "allowHangUp": true,
+        "allowCallback": true,
+        "liveTransfer": true
+      },
+      "id": 1
+    }
+  ],
   "attachments": [
     {
       "key": "2aaf5552-715b-4de3-8875-37453fb77462",
@@ -150,6 +171,13 @@
       "size": 36240,
       "mimeType": "application/pdf",
       "id": 3
+    },
+    {
+      "key": "d44497e0-3f6d-4595-9e1d-5c7a55458742",
+      "name": "CoverLetterV3.pdf",
+      "size": 36240,
+      "mimeType": "application/pdf",
+      "id": 4
     }
   ]
 }
