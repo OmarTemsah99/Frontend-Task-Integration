@@ -11,6 +11,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import {
   Field,
   FieldContent,
@@ -43,12 +53,14 @@ import {
   useModels,
   usePrompts,
   useVoices,
+  notifyAgentsChanged,
 } from "@/hooks/use-api-data";
 import { Spinner } from "@/components/ui/spinner";
 import { uploadFileFlow } from "@/lib/file-upload";
 import { createAgent, updateAgent, startTestCall } from "@/lib/api-client";
 import { Check, RefreshCw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import * as z from "zod";
 
 interface UploadedFile {
   tempId: string;
@@ -70,6 +82,48 @@ const ACCEPTED_TYPES = [
   ".xlsx",
   ".xls",
 ];
+
+// Form validation schema
+const agentFormSchema = z.object({
+  agentName: z
+    .string()
+    .min(3, "Agent name must be at least 3 characters")
+    .max(50, "Agent name cannot exceed 50 characters")
+    .regex(
+      /^[a-zA-Z0-9\s-_]+$/,
+      "Agent name can only contain letters, numbers, spaces, hyphens, and underscores",
+    ),
+  description: z
+    .string()
+    .min(10, "Description must be at least 10 characters")
+    .max(500, "Description cannot exceed 500 characters")
+    .optional()
+    .or(z.literal("")),
+  callType: z.string().min(1, "Call type is required"),
+  language: z.string().min(1, "Language is required"),
+  voice: z.string().min(1, "Voice is required"),
+  prompt: z.string().min(1, "Prompt is required"),
+  model: z.string().min(1, "Model is required"),
+  latency: z.number(),
+  speed: z.number(),
+  callScript: z
+    .string()
+    .min(20, "Call script must be at least 20 characters")
+    .max(2000, "Call script cannot exceed 2000 characters")
+    .optional()
+    .or(z.literal("")),
+  serviceDescription: z
+    .string()
+    .min(20, "Service description must be at least 20 characters")
+    .max(1000, "Service description cannot exceed 1000 characters")
+    .optional()
+    .or(z.literal("")),
+  allowHangUp: z.boolean(),
+  allowCallback: z.boolean(),
+  liveTransfer: z.boolean(),
+});
+
+type AgentFormValues = z.infer<typeof agentFormSchema>;
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + " B";
@@ -158,50 +212,36 @@ export function AgentForm({
   initialData,
   agentId: agentIdProp,
 }: AgentFormProps) {
-  // Form state — initialized from initialData when provided
-  const [agentName, setAgentName] = useState(initialData?.agentName ?? "");
-  const [callType, setCallType] = useState(initialData?.callType ?? "");
-  const [language, setLanguage] = useState(initialData?.language ?? "");
-  const [voice, setVoice] = useState(initialData?.voice ?? "");
-  const [prompt, setPrompt] = useState(initialData?.prompt ?? "");
-  const [model, setModel] = useState(initialData?.model ?? "");
-  const [latency, setLatency] = useState([initialData?.latency ?? 0.5]);
-  const [speed, setSpeed] = useState([initialData?.speed ?? 110]);
-  const [description, setDescription] = useState(
-    initialData?.description ?? "",
-  );
+  // Form Metadata
+  const [agentId, setAgentId] = useState<string | undefined>(agentIdProp);
 
-  // Call Script
-  const [callScript, setCallScript] = useState(initialData?.callScript ?? "");
+  // Form definition
+  const form = useForm<AgentFormValues>({
+    resolver: zodResolver(agentFormSchema),
+    defaultValues: {
+      agentName: initialData?.agentName ?? "",
+      description: initialData?.description ?? "",
+      callType: initialData?.callType ?? "",
+      language: initialData?.language ?? "",
+      voice: initialData?.voice ?? "",
+      prompt: initialData?.prompt ?? "",
+      model: initialData?.model ?? "",
+      latency: initialData?.latency ?? 0.5,
+      speed: initialData?.speed ?? 110,
+      callScript: initialData?.callScript ?? "",
+      serviceDescription: initialData?.serviceDescription ?? "",
+      allowHangUp: initialData?.tools?.allowHangUp ?? false,
+      allowCallback: initialData?.tools?.allowCallback ?? false,
+      liveTransfer: initialData?.tools?.liveTransfer ?? false,
+    },
+  });
 
-  // Service/Product Description
-  const [serviceDescription, setServiceDescription] = useState(
-    initialData?.serviceDescription ?? "",
-  );
+  const { isSubmitting } = form.formState;
 
   // Reference Data
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Tools State
-  const [allowHangUp, setAllowHangUp] = useState(
-    initialData?.tools?.allowHangUp ?? false,
-  );
-  const [allowCallback, setAllowCallback] = useState(
-    initialData?.tools?.allowCallback ?? false,
-  );
-  const [liveTransfer, setLiveTransfer] = useState(
-    initialData?.tools?.liveTransfer ?? false,
-  );
-
-  // Form Metadata
-  const [agentId, setAgentId] = useState<string | undefined>(agentIdProp);
-  // Actually, for "edit" mode, initialData usually represents an existing agent which has an ID.
-  // But the interface for InitialData didn't have ID. Let's assume we might get it back from save or it might be needed.
-  // For now, let's track if we have an ID to switch modes if needed.
-
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Test Call State
   const [testFirstName, setTestFirstName] = useState("");
@@ -210,14 +250,15 @@ export function AgentForm({
   const [testPhone, setTestPhone] = useState("");
   const [isTestCalling, setIsTestCalling] = useState(false);
 
-  // Badge counts for required fields
+  // Badge counts for required fields (Checking form values)
+  const formValues = form.watch();
   const basicSettingsMissing = [
-    agentName,
-    callType,
-    language,
-    voice,
-    prompt,
-    model,
+    formValues.agentName,
+    formValues.callType,
+    formValues.language,
+    formValues.voice,
+    formValues.prompt,
+    formValues.model,
   ].filter((v) => !v).length;
 
   // File upload handlers
@@ -297,47 +338,26 @@ export function AgentForm({
   };
 
   // Save Handler
-  const validateForm = () => {
-    const errors: string[] = [];
-    if (!agentName) errors.push("Agent Name is required");
-    if (!callType) errors.push("Call Type is required");
-    if (!language) errors.push("Language is required");
-    if (!voice) errors.push("Voice is required");
-    if (!prompt) errors.push("Prompt is required");
-    if (!model) errors.push("Model is required");
-    return errors;
-  };
-
-  const handleSaveAgent = async (): Promise<boolean> => {
-    const errors = validateForm();
-    if (errors.length > 0) {
-      toast.error("Please fix the following errors", {
-        description: errors.join(", "),
-      });
-      return false;
-    }
-
-    setIsSubmitting(true);
-
+  const onSubmit = async (values: AgentFormValues): Promise<boolean> => {
     const payload = {
-      name: agentName,
-      description,
-      callType,
-      language,
-      voice,
-      prompt,
-      model,
-      latency: latency[0],
-      speed: speed[0],
-      callScript,
-      serviceDescription,
+      name: values.agentName,
+      description: values.description || "",
+      callType: values.callType,
+      language: values.language,
+      voice: values.voice,
+      prompt: values.prompt,
+      model: values.model,
+      latency: values.latency,
+      speed: values.speed,
+      callScript: values.callScript || "",
+      serviceDescription: values.serviceDescription || "",
       attachments: uploadedFiles
         .filter((f) => f.status === "completed" && f.id)
         .map((f) => f.id as string),
       tools: {
-        allowHangUp,
-        allowCallback,
-        liveTransfer,
+        allowHangUp: values.allowHangUp,
+        allowCallback: values.allowCallback,
+        liveTransfer: values.liveTransfer,
       },
     };
 
@@ -351,13 +371,12 @@ export function AgentForm({
 
       setAgentId(savedAgent.id);
       toast.success("Agent saved successfully!");
+      notifyAgentsChanged();
       return true;
     } catch (error) {
       console.error(error);
       toast.error("Failed to save agent. Please try again.");
       return false;
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -368,11 +387,14 @@ export function AgentForm({
       return;
     }
 
-    // 2. Auto-save the agent first if not yet saved
-    if (!agentId) {
-      const saved = await handleSaveAgent();
-      if (!saved) return;
-    }
+    // 2. Auto-save the agent first if not yet saved (or if dirty?)
+    // Triggering submit
+    let saved = false;
+    await form.handleSubmit(async (data) => {
+      saved = await onSubmit(data);
+    })();
+
+    if (!saved) return;
 
     // 3. Make the test call
     setIsTestCalling(true);
@@ -434,508 +456,655 @@ export function AgentForm({
   const { models, loading: modelsLoading, error: modelsError } = useModels();
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">{heading}</h1>
-        <Button onClick={handleSaveAgent} disabled={isSubmitting}>
-          {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {saveLabel}
-        </Button>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column — Collapsible Sections */}
-        <div className="lg:col-span-2 flex flex-col gap-4">
-          {/* Section 1: Basic Settings */}
-          <CollapsibleSection
-            title="Basic Settings"
-            description="Add some information about your agent to get started."
-            badge={basicSettingsMissing}
-            defaultOpen>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="agent-name">
-                  Agent Name <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="agent-name"
-                  placeholder="e.g. Sales Assistant"
-                  value={agentName}
-                  onChange={(e) => setAgentName(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="description">Description</Label>
-                <Input
-                  id="description"
-                  placeholder="Describe what this agent does..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>
-                  Call Type <span className="text-destructive">*</span>
-                </Label>
-                <Select value={callType} onValueChange={setCallType}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select call type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="inbound">
-                      Inbound (Receive Calls)
-                    </SelectItem>
-                    <SelectItem value="outbound">
-                      Outbound (Make Calls)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>
-                  Language <span className="text-destructive">*</span>
-                </Label>
-                <Select value={language} onValueChange={setLanguage}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue
-                      placeholder={
-                        languagesLoading ? (
-                          <>
-                            Loading Languages... <Spinner />
-                          </>
-                        ) : (
-                          "Select language"
-                        )
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {languagesError && <p>{languagesError}</p>}
-
-                    {languages.map((lang) => (
-                      <SelectItem key={lang.id} value={lang.id}>
-                        {lang.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>
-                  Voice <span className="text-destructive">*</span>
-                </Label>
-                <Select value={voice} onValueChange={setVoice}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue
-                      placeholder={
-                        voicesLoading ? (
-                          <>
-                            Loading Voices... <Spinner />
-                          </>
-                        ) : (
-                          "Select voice"
-                        )
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {voicesError && <p>{voicesError}</p>}
-
-                    {voices.map((voice) => (
-                      <SelectItem key={voice.id} value={voice.id}>
-                        <div className="flex items-center gap-2">
-                          {voice.name}
-
-                          <Badge variant={"secondary"}>{voice.tag}</Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>
-                  Prompt <span className="text-destructive">*</span>
-                </Label>
-                <Select value={prompt} onValueChange={setPrompt}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue
-                      placeholder={
-                        promptsLoading ? (
-                          <>
-                            Loading Prompts... <Spinner />
-                          </>
-                        ) : (
-                          "Select prompt"
-                        )
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {promptsError && <p>{promptsError}</p>}
-
-                    {prompts.map((prompt) => (
-                      <SelectItem key={prompt.id} value={prompt.id}>
-                        {prompt.name}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="custom">Custom Prompt</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>
-                  Model <span className="text-destructive">*</span>
-                </Label>
-                <Select value={model} onValueChange={setModel}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue
-                      placeholder={
-                        modelsLoading ? (
-                          <>
-                            Loading Models... <Spinner />
-                          </>
-                        ) : (
-                          "Select model"
-                        )
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {modelsError && <p>{modelsError}</p>}
-
-                    {models.map((model) => (
-                      <SelectItem key={model.id} value={model.id}>
-                        {model.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Latency ({latency[0].toFixed(1)}s)</Label>
-                  <Slider
-                    value={latency}
-                    onValueChange={setLatency}
-                    min={0.3}
-                    max={1}
-                    step={0.1}
-                  />
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>0.3s</span>
-                    <span>1.0s</span>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Speed ({speed[0]}%)</Label>
-                  <Slider
-                    value={speed}
-                    onValueChange={setSpeed}
-                    min={90}
-                    max={130}
-                    step={1}
-                  />
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>90%</span>
-                    <span>130%</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </CollapsibleSection>
-
-          {/* Section 2: Call Script */}
-          <CollapsibleSection
-            title="Call Script"
-            description="What would you like the AI agent to say during the call?">
-            <div className="space-y-2">
-              <Textarea
-                placeholder="Write your call script here..."
-                value={callScript}
-                onChange={(e) => setCallScript(e.target.value)}
-                rows={6}
-                maxLength={20000}
-              />
-              <p className="text-xs text-muted-foreground text-right">
-                {callScript.length}/20000
-              </p>
-            </div>
-          </CollapsibleSection>
-
-          {/* Section 4: Service/Product Description */}
-          <CollapsibleSection
-            title="Service/Product Description"
-            description="Add a knowledge base about your service or product.">
-            <div className="space-y-2">
-              <Textarea
-                placeholder="Describe your service or product..."
-                value={serviceDescription}
-                onChange={(e) => setServiceDescription(e.target.value)}
-                rows={6}
-                maxLength={20000}
-              />
-              <p className="text-xs text-muted-foreground text-right">
-                {serviceDescription.length}/20000
-              </p>
-            </div>
-          </CollapsibleSection>
-
-          {/* Section 5: Reference Data */}
-          <CollapsibleSection
-            title="Reference Data"
-            description="Enhance your agent's knowledge base with uploaded files.">
-            <div className="space-y-4">
-              {/* Drop zone */}
-              <div
-                className={`relative rounded-lg border-2 border-dashed p-8 text-center transition-colors cursor-pointer ${
-                  isDragging
-                    ? "border-primary bg-primary/5"
-                    : "border-muted-foreground/25"
-                }`}
-                onClick={() => fileInputRef.current?.click()}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  multiple
-                  accept={ACCEPTED_TYPES.join(",")}
-                  onChange={(e) => handleFiles(e.target.files)}
-                />
-                <Upload className="mx-auto h-8 w-8 text-muted-foreground" />
-                <p className="mt-2 text-sm font-medium">
-                  Drag & drop files here, or{" "}
-                  <span className="text-primary underline">browse</span>
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Accepted: .pdf, .doc, .docx, .txt, .csv, .xlsx, .xls
-                </p>
-              </div>
-
-              {/* File list */}
-              {uploadedFiles.length > 0 ? (
-                <div className="space-y-2">
-                  {uploadedFiles.map((f) => (
-                    <div
-                      key={f.tempId}
-                      className="flex items-center justify-between rounded-md border px-3 py-2">
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <div className="flex flex-col min-w-0 flex-1">
-                          <span className="text-sm truncate">{f.name}</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground shrink-0">
-                              {formatFileSize(f.size)}
-                            </span>
-                            {f.status === "uploading" && (
-                              <div className="h-1 flex-1 bg-secondary rounded-full overflow-hidden max-w-25">
-                                <div
-                                  className="h-full bg-primary transition-all duration-300"
-                                  style={{ width: `${f.progress}%` }}
-                                />
-                              </div>
-                            )}
-                            {f.status === "error" && (
-                              <span className="text-xs text-destructive">
-                                {f.error}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        {f.status === "completed" && (
-                          <Check className="h-4 w-4 text-green-500" />
-                        )}
-                        {f.status === "uploading" && (
-                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                        )}
-                        {f.status === "error" && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-destructive hover:text-destructive"
-                            onClick={() => retryUpload(f.tempId)}>
-                            <RefreshCw className="h-4 w-4" />
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 shrink-0"
-                          onClick={() => removeFile(f.tempId)}>
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
-                  <FileText className="h-10 w-10 mb-2" />
-                  <p className="text-sm">No Files Available</p>
-                </div>
-              )}
-            </div>
-          </CollapsibleSection>
-
-          {/* Section 6: Tools */}
-          <CollapsibleSection
-            title="Tools"
-            description="Tools that allow the AI agent to perform call-handling actions and manage session control.">
-            <FieldGroup className="w-full">
-              <FieldLabel htmlFor="switch-hangup">
-                <Field orientation="horizontal" className="items-center">
-                  <FieldContent>
-                    <FieldTitle>Allow hang up</FieldTitle>
-                    <FieldDescription>
-                      Select if you would like to allow the agent to hang up the
-                      call
-                    </FieldDescription>
-                  </FieldContent>
-                  <Switch
-                    id="switch-hangup"
-                    checked={allowHangUp}
-                    onCheckedChange={setAllowHangUp}
-                  />
-                </Field>
-              </FieldLabel>
-              <FieldLabel htmlFor="switch-callback">
-                <Field orientation="horizontal" className="items-center">
-                  <FieldContent>
-                    <FieldTitle>Allow callback</FieldTitle>
-                    <FieldDescription>
-                      Select if you would like to allow the agent to make
-                      callbacks
-                    </FieldDescription>
-                  </FieldContent>
-                  <Switch
-                    id="switch-callback"
-                    checked={allowCallback}
-                    onCheckedChange={setAllowCallback}
-                  />
-                </Field>
-              </FieldLabel>
-              <FieldLabel htmlFor="switch-transfer">
-                <Field orientation="horizontal" className="items-center">
-                  <FieldContent>
-                    <FieldTitle>Live transfer</FieldTitle>
-                    <FieldDescription>
-                      Select if you want to transfer the call to a human agent
-                    </FieldDescription>
-                  </FieldContent>
-                  <Switch
-                    id="switch-transfer"
-                    checked={liveTransfer}
-                    onCheckedChange={setLiveTransfer}
-                  />
-                </Field>
-              </FieldLabel>
-            </FieldGroup>
-          </CollapsibleSection>
-        </div>
-
-        {/* Right Column — Sticky Test Call Card */}
-        <div className="lg:col-span-1">
-          <div className="lg:sticky lg:top-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Phone className="h-5 w-5" />
-                  Test Call
-                </CardTitle>
-                <CardDescription>
-                  Make a test call to preview your agent. Each test call will
-                  deduct credits from your account.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label htmlFor="test-first-name">First Name</Label>
-                      <Input
-                        id="test-first-name"
-                        placeholder="John"
-                        value={testFirstName}
-                        onChange={(e) => setTestFirstName(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="test-last-name">Last Name</Label>
-                      <Input
-                        id="test-last-name"
-                        placeholder="Doe"
-                        value={testLastName}
-                        onChange={(e) => setTestLastName(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Gender</Label>
-                    <Select value={testGender} onValueChange={setTestGender}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select gender" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="male">Male</SelectItem>
-                        <SelectItem value="female">Female</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="test-phone">
-                      Phone Number <span className="text-destructive">*</span>
-                    </Label>
-                    <PhoneInput
-                      defaultCountry="EG"
-                      value={testPhone}
-                      onChange={(value) => setTestPhone(value)}
-                      placeholder="Enter phone number"
-                    />
-                  </div>
-
-                  <Button
-                    className="w-full"
-                    onClick={handleStartTestCall}
-                    disabled={isTestCalling || isSubmitting}>
-                    {isTestCalling ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Phone className="mr-2 h-4 w-4" />
-                    )}
-                    {isTestCalling ? "Calling..." : "Start Test Call"}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </div>
-
-      {/* Sticky bottom save bar */}
-      <div className="sticky bottom-0 -mx-6 -mb-6 border-t bg-background px-6 py-4">
-        <div className="flex justify-end">
-          <Button onClick={handleSaveAgent} disabled={isSubmitting}>
+    <Form {...form}>
+      <form
+        onSubmit={form.handleSubmit(onSubmit)}
+        className="flex flex-1 flex-col gap-6 p-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold">{heading}</h1>
+          <Button type="submit" disabled={isSubmitting}>
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {saveLabel}
           </Button>
         </div>
-      </div>
-    </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column — Collapsible Sections */}
+          <div className="lg:col-span-2 flex flex-col gap-4">
+            {/* Section 1: Basic Settings */}
+            <CollapsibleSection
+              title="Basic Settings"
+              description="Add some information about your agent to get started."
+              badge={basicSettingsMissing}
+              defaultOpen>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="agentName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        Agent Name <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Sales Assistant" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Description</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Describe what this agent does..."
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="callType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        Call Type <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        value={field.value}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select call type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="inbound">
+                            Inbound (Receive Calls)
+                          </SelectItem>
+                          <SelectItem value="outbound">
+                            Outbound (Make Calls)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="language"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        Language <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        value={field.value}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue
+                              placeholder={
+                                languagesLoading ? (
+                                  <>
+                                    Loading Languages... <Spinner />
+                                  </>
+                                ) : (
+                                  "Select language"
+                                )
+                              }
+                            />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {languagesError && <p>{languagesError}</p>}
+                          {languages.map((lang) => (
+                            <SelectItem key={lang.id} value={lang.id}>
+                              {lang.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="voice"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        Voice <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        value={field.value}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue
+                              placeholder={
+                                voicesLoading ? (
+                                  <>
+                                    Loading Voices... <Spinner />
+                                  </>
+                                ) : (
+                                  "Select voice"
+                                )
+                              }
+                            />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {voicesError && <p>{voicesError}</p>}
+                          {voices.map((voice) => (
+                            <SelectItem key={voice.id} value={voice.id}>
+                              <div className="flex items-center gap-2">
+                                {voice.name}
+                                <Badge variant={"secondary"}>{voice.tag}</Badge>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="prompt"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        Prompt <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        value={field.value}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue
+                              placeholder={
+                                promptsLoading ? (
+                                  <>
+                                    Loading Prompts... <Spinner />
+                                  </>
+                                ) : (
+                                  "Select prompt"
+                                )
+                              }
+                            />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {promptsError && <p>{promptsError}</p>}
+                          {prompts.map((prompt) => (
+                            <SelectItem key={prompt.id} value={prompt.id}>
+                              {prompt.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="model"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        Model <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        value={field.value}>
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue
+                              placeholder={
+                                modelsLoading ? (
+                                  <>
+                                    Loading Models... <Spinner />
+                                  </>
+                                ) : (
+                                  "Select model"
+                                )
+                              }
+                            />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {modelsError && <p>{modelsError}</p>}
+                          {models.map((model) => (
+                            <SelectItem key={model.id} value={model.id}>
+                              {model.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="latency"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          Latency ({Number(field.value).toFixed(1)}s)
+                        </FormLabel>
+                        <FormControl>
+                          <Slider
+                            value={[field.value]}
+                            onValueChange={(vals) => field.onChange(vals[0])}
+                            min={0.3}
+                            max={1}
+                            step={0.1}
+                          />
+                        </FormControl>
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>0.3s</span>
+                          <span>1.0s</span>
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="speed"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Speed ({field.value}%)</FormLabel>
+                        <FormControl>
+                          <Slider
+                            value={[field.value]}
+                            onValueChange={(vals) => field.onChange(vals[0])}
+                            min={90}
+                            max={130}
+                            step={1}
+                          />
+                        </FormControl>
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>90%</span>
+                          <span>130%</span>
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
+            </CollapsibleSection>
+
+            {/* Section 2: Call Script */}
+            <CollapsibleSection
+              title="Call Script"
+              description="What would you like the AI agent to say during the call?">
+              <FormField
+                control={form.control}
+                name="callScript"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Write your call script here..."
+                        {...field}
+                        rows={6}
+                        maxLength={20000}
+                      />
+                    </FormControl>
+                    <p className="text-xs text-muted-foreground text-right">
+                      {(field.value || "").length}/20000
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CollapsibleSection>
+
+            {/* Section 4: Service/Product Description */}
+            <CollapsibleSection
+              title="Service/Product Description"
+              description="Add a knowledge base about your service or product.">
+              <FormField
+                control={form.control}
+                name="serviceDescription"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Describe your service or product..."
+                        {...field}
+                        rows={6}
+                        maxLength={20000}
+                      />
+                    </FormControl>
+                    <p className="text-xs text-muted-foreground text-right">
+                      {(field.value || "").length}/20000
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CollapsibleSection>
+
+            {/* Section 5: Reference Data */}
+            <CollapsibleSection
+              title="Reference Data"
+              description="Enhance your agent's knowledge base with uploaded files.">
+              <div className="space-y-4">
+                {/* Drop zone */}
+                <div
+                  className={`relative rounded-lg border-2 border-dashed p-8 text-center transition-colors cursor-pointer ${
+                    isDragging
+                      ? "border-primary bg-primary/5"
+                      : "border-muted-foreground/25"
+                  }`}
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    multiple
+                    accept={ACCEPTED_TYPES.join(",")}
+                    onChange={(e) => handleFiles(e.target.files)}
+                  />
+                  <Upload className="mx-auto h-8 w-8 text-muted-foreground" />
+                  <p className="mt-2 text-sm font-medium">
+                    Drag & drop files here, or{" "}
+                    <span className="text-primary underline">browse</span>
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Accepted: .pdf, .doc, .docx, .txt, .csv, .xlsx, .xls
+                  </p>
+                </div>
+
+                {/* File list */}
+                {uploadedFiles.length > 0 ? (
+                  <div className="space-y-2">
+                    {uploadedFiles.map((f) => (
+                      <div
+                        key={f.tempId}
+                        className="flex items-center justify-between rounded-md border px-3 py-2">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <span className="text-sm truncate">{f.name}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground shrink-0">
+                                {formatFileSize(f.size)}
+                              </span>
+                              {f.status === "uploading" && (
+                                <div className="h-1 flex-1 bg-secondary rounded-full overflow-hidden max-w-25">
+                                  <div
+                                    className="h-full bg-primary transition-all duration-300"
+                                    style={{ width: `${f.progress}%` }}
+                                  />
+                                </div>
+                              )}
+                              {f.status === "error" && (
+                                <span className="text-xs text-destructive">
+                                  {f.error}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          {f.status === "completed" && (
+                            <Check className="h-4 w-4 text-green-500" />
+                          )}
+                          {f.status === "uploading" && (
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          )}
+                          {f.status === "error" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive hover:text-destructive"
+                              onClick={() => retryUpload(f.tempId)}>
+                              <RefreshCw className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0"
+                            onClick={() => removeFile(f.tempId)}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+                    <FileText className="h-10 w-10 mb-2" />
+                    <p className="text-sm">No Files Available</p>
+                  </div>
+                )}
+              </div>
+            </CollapsibleSection>
+
+            {/* Section 6: Tools */}
+            <CollapsibleSection
+              title="Tools"
+              description="Tools that allow the AI agent to perform call-handling actions and manage session control.">
+              <FieldGroup className="w-full">
+                <FormField
+                  control={form.control}
+                  name="allowHangUp"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FieldLabel htmlFor="switch-hangup">
+                        <Field
+                          orientation="horizontal"
+                          className="items-center">
+                          <FieldContent>
+                            <FieldTitle>Allow hang up</FieldTitle>
+                            <FieldDescription>
+                              Select if you would like to allow the agent to
+                              hang up the call
+                            </FieldDescription>
+                          </FieldContent>
+                          <FormControl>
+                            <Switch
+                              id="switch-hangup"
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                        </Field>
+                      </FieldLabel>
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="allowCallback"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FieldLabel htmlFor="switch-callback">
+                        <Field
+                          orientation="horizontal"
+                          className="items-center">
+                          <FieldContent>
+                            <FieldTitle>Allow callback</FieldTitle>
+                            <FieldDescription>
+                              Select if you would like to allow the agent to
+                              make callbacks
+                            </FieldDescription>
+                          </FieldContent>
+                          <FormControl>
+                            <Switch
+                              id="switch-callback"
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                        </Field>
+                      </FieldLabel>
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="liveTransfer"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FieldLabel htmlFor="switch-transfer">
+                        <Field
+                          orientation="horizontal"
+                          className="items-center">
+                          <FieldContent>
+                            <FieldTitle>Live transfer</FieldTitle>
+                            <FieldDescription>
+                              Select if you want to transfer the call to a human
+                              agent
+                            </FieldDescription>
+                          </FieldContent>
+                          <FormControl>
+                            <Switch
+                              id="switch-transfer"
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                        </Field>
+                      </FieldLabel>
+                    </FormItem>
+                  )}
+                />
+              </FieldGroup>
+            </CollapsibleSection>
+          </div>
+
+          {/* Right Column — Sticky Test Call Card */}
+          <div className="lg:col-span-1">
+            <div className="lg:sticky lg:top-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Phone className="h-5 w-5" />
+                    Test Call
+                  </CardTitle>
+                  <CardDescription>
+                    Make a test call to preview your agent. Each test call will
+                    deduct credits from your account.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="test-first-name">First Name</Label>
+                        <Input
+                          id="test-first-name"
+                          placeholder="John"
+                          value={testFirstName}
+                          onChange={(e) => setTestFirstName(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="test-last-name">Last Name</Label>
+                        <Input
+                          id="test-last-name"
+                          placeholder="Doe"
+                          value={testLastName}
+                          onChange={(e) => setTestLastName(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Gender</Label>
+                      <Select value={testGender} onValueChange={setTestGender}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select gender" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="male">Male</SelectItem>
+                          <SelectItem value="female">Female</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="test-phone">
+                        Phone Number <span className="text-destructive">*</span>
+                      </Label>
+                      <PhoneInput
+                        defaultCountry="EG"
+                        value={testPhone}
+                        onChange={(value) => setTestPhone(value)}
+                        placeholder="Enter phone number"
+                      />
+                    </div>
+
+                    <Button
+                      type="button"
+                      className="w-full"
+                      onClick={handleStartTestCall}
+                      disabled={isTestCalling || isSubmitting}>
+                      {isTestCalling ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Phone className="mr-2 h-4 w-4" />
+                      )}
+                      {isTestCalling ? "Calling..." : "Start Test Call"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </div>
+
+        {/* Sticky bottom save bar */}
+        <div className="sticky bottom-0 -mx-6 -mb-6 border-t bg-background px-6 py-4">
+          <div className="flex justify-end">
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              {saveLabel}
+            </Button>
+          </div>
+        </div>
+      </form>
+    </Form>
   );
 }

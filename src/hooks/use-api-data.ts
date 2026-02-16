@@ -1,7 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001/api";
+
+// Agent refetch listener system
+const agentListeners = new Set<() => void>();
+
+export function notifyAgentsChanged() {
+  agentListeners.forEach((listener) => listener());
+}
 
 // Type definitions
 export interface Language {
@@ -183,30 +190,47 @@ export function useAgents() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const refetchCounterRef = useRef(0);
 
-  useEffect(() => {
-    const fetchAgents = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const response = await fetch(`${API_BASE_URL}/agents`);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch agents: ${response.statusText}`);
-        }
-        const data = await response.json();
-        setAgents(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to fetch agents");
-        setAgents([]);
-      } finally {
-        setLoading(false);
+  const fetchAgents = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await fetch(`${API_BASE_URL}/agents`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch agents: ${response.statusText}`);
       }
-    };
-
-    fetchAgents();
+      const data = await response.json();
+      setAgents(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch agents");
+      setAgents([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  return { agents, loading, error };
+  const refetch = useCallback(async () => {
+    refetchCounterRef.current += 1;
+    await fetchAgents();
+  }, [fetchAgents]);
+
+  useEffect(() => {
+    fetchAgents();
+  }, [fetchAgents]);
+
+  useEffect(() => {
+    const listener = () => {
+      refetch();
+    };
+
+    agentListeners.add(listener);
+    return () => {
+      agentListeners.delete(listener);
+    };
+  }, [refetch]);
+
+  return { agents, loading, error, refetch };
 }
 
 // Hook for fetching agents

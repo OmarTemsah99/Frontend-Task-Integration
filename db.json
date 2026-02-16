@@ -130,7 +130,7 @@
   ],
   "agents": [
     {
-      "name": "Test Agent",
+      "name": "Test Agent_Updated",
       "description": "Agent for testing",
       "callType": "inbound",
       "language": "ar",
@@ -141,15 +141,53 @@
       "speed": 110,
       "callScript": "testing calls 1 2 3 test test test",
       "serviceDescription": "testing calls 1 2 3 test test test",
-      "attachments": [
-        5
-      ],
+      "attachments": [],
       "tools": {
         "allowHangUp": true,
         "allowCallback": true,
         "liveTransfer": true
       },
       "id": 1
+    },
+    {
+      "name": "Test Agent 2",
+      "description": "Agent for testing 2",
+      "callType": "inbound",
+      "language": "en",
+      "voice": "alloy",
+      "prompt": "default",
+      "model": "pro",
+      "latency": 0.7,
+      "speed": 104,
+      "callScript": "",
+      "serviceDescription": "",
+      "attachments": [],
+      "tools": {
+        "allowHangUp": false,
+        "allowCallback": false,
+        "liveTransfer": false
+      },
+      "id": 2
+    },
+    {
+      "name": "Test Agent",
+      "description": "Agent for testing",
+      "callType": "inbound",
+      "language": "ja",
+      "voice": "fable",
+      "prompt": "support",
+      "model": "flex",
+      "latency": 0.5,
+      "speed": 110,
+      "callScript": "",
+      "serviceDescription": "",
+      "attachments": [],
+      "tools": {
+        "allowHangUp": false,
+        "allowCallback": false,
+        "liveTransfer": false
+      },
+      "id": 3
     }
   ],
   "attachments": [
