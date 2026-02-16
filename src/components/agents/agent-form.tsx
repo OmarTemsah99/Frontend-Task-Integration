@@ -19,7 +19,7 @@ import {
   useVoices,
 } from "@/hooks/use-api-data";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import AgentBasicSettings from "./agent-basic-settings";
 import AgentFileUploader from "./agent-file-uploader";
@@ -151,6 +151,69 @@ export function AgentForm({
 
   const { isSubmitting } = form.formState;
 
+  // Unsaved changes handling
+  const allowNavigationRef = useRef(false);
+
+  useEffect(() => {
+    const isDirty = form.formState.isDirty && !isSubmitting;
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!isDirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+      return "";
+    };
+
+    const handleLinkClick = (e: MouseEvent) => {
+      if (!isDirty) return;
+      const target = e.target as HTMLElement;
+      const anchor =
+        target.closest && (target.closest("a") as HTMLAnchorElement | null);
+      if (!anchor) return;
+      const href = anchor.getAttribute("href");
+      const targetAttr = anchor.getAttribute("target");
+      if (!href) return;
+      if (
+        href.startsWith("#") ||
+        targetAttr === "_blank" ||
+        href.startsWith("mailto:") ||
+        href.startsWith("tel:")
+      )
+        return;
+      // external link
+      if (href.startsWith("http") && !href.startsWith(location.origin)) return;
+
+      const leave = window.confirm(
+        "You have unsaved changes. Are you sure you want to leave this page?",
+      );
+      if (!leave) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    };
+
+    const handlePopState = () => {
+      if (!isDirty || allowNavigationRef.current) return;
+      const leave = window.confirm(
+        "You have unsaved changes. Are you sure you want to leave this page?",
+      );
+      if (!leave) {
+        // Push the same URL back to prevent navigation
+        history.pushState(null, "", location.href);
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleLinkClick, true);
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleLinkClick, true);
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [form.formState, isSubmitting]);
+
   // Reference Data
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -281,6 +344,9 @@ export function AgentForm({
       } else {
         savedAgent = await createAgent(payload);
       }
+
+      // allow navigation after successful save
+      allowNavigationRef.current = true;
 
       setAgentId(savedAgent.id);
       toast.success("Agent saved successfully!");
