@@ -141,7 +141,9 @@
       "speed": 110,
       "callScript": "testing calls 1 2 3 test test test",
       "serviceDescription": "testing calls 1 2 3 test test test",
-      "attachments": [],
+      "attachments": [
+        5
+      ],
       "tools": {
         "allowHangUp": true,
         "allowCallback": true,
@@ -178,6 +180,13 @@
       "size": 36240,
       "mimeType": "application/pdf",
       "id": 4
+    },
+    {
+      "key": "93cac605-b9f0-43f7-a2cb-11048f92ccec",
+      "name": "CoverLetterV3.pdf",
+      "size": 36240,
+      "mimeType": "application/pdf",
+      "id": 5
     }
   ]
 }

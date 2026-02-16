@@ -48,6 +48,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { uploadFileFlow } from "@/lib/file-upload";
 import { createAgent, updateAgent, startTestCall } from "@/lib/api-client";
 import { Check, RefreshCw, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 interface UploadedFile {
   tempId: string;
@@ -310,7 +311,9 @@ export function AgentForm({
   const handleSaveAgent = async (): Promise<boolean> => {
     const errors = validateForm();
     if (errors.length > 0) {
-      alert(`Please fix the following errors:\n- ${errors.join("\n- ")}`);
+      toast.error("Please fix the following errors", {
+        description: errors.join(", "),
+      });
       return false;
     }
 
@@ -347,11 +350,11 @@ export function AgentForm({
       }
 
       setAgentId(savedAgent.id);
-      alert("Agent saved successfully!");
+      toast.success("Agent saved successfully!");
       return true;
     } catch (error) {
       console.error(error);
-      alert("Failed to save agent. Please try again.");
+      toast.error("Failed to save agent. Please try again.");
       return false;
     } finally {
       setIsSubmitting(false);
@@ -361,7 +364,7 @@ export function AgentForm({
   const handleStartTestCall = async () => {
     // 1. Validate phone number
     if (!testPhone) {
-      alert("Phone number is required for a test call.");
+      toast.error("Phone number is required for a test call.");
       return;
     }
 
@@ -380,10 +383,12 @@ export function AgentForm({
         gender: testGender,
         phoneNumber: testPhone,
       });
-      alert(`Test call started! Call ID: ${result.callId}`);
+      toast.success(`Test call started!`, {
+        description: `Call ID: ${result.callId}`,
+      });
     } catch (error) {
       console.error(error);
-      alert("Failed to start test call. Please try again.");
+      toast.error("Failed to start test call. Please try again.");
     } finally {
       setIsTestCalling(false);
     }
