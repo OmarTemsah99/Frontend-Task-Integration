@@ -46,7 +46,7 @@ import {
 } from "@/hooks/use-api-data";
 import { Spinner } from "@/components/ui/spinner";
 import { uploadFileFlow } from "@/lib/file-upload";
-import { createAgent, updateAgent } from "@/lib/api-client";
+import { createAgent, updateAgent, startTestCall } from "@/lib/api-client";
 import { Check, RefreshCw, Loader2 } from "lucide-react";
 
 interface UploadedFile {
@@ -207,6 +207,7 @@ export function AgentForm({
   const [testLastName, setTestLastName] = useState("");
   const [testGender, setTestGender] = useState("");
   const [testPhone, setTestPhone] = useState("");
+  const [isTestCalling, setIsTestCalling] = useState(false);
 
   // Badge counts for required fields
   const basicSettingsMissing = [
@@ -306,11 +307,11 @@ export function AgentForm({
     return errors;
   };
 
-  const handleSaveAgent = async () => {
+  const handleSaveAgent = async (): Promise<boolean> => {
     const errors = validateForm();
     if (errors.length > 0) {
       alert(`Please fix the following errors:\n- ${errors.join("\n- ")}`);
-      return;
+      return false;
     }
 
     setIsSubmitting(true);
@@ -339,35 +340,52 @@ export function AgentForm({
 
     try {
       let savedAgent;
-      // If we are in edit mode OR we have already saved (created) the agent in this session
-      if (mode === "edit" || agentId) {
-        // For edit mode, we presume initialData might have needed an ID, OR we need the ID from somewhere.
-        // Since initialData interface doesn't have ID, and props doesn't pass ID directly (only initialData),
-        // We might be missing the ID for the initial Edit case if it's not in initialData.
-        // However, assuming for "create", once we save, we get an ID.
-        // For "edit", usually the ID is available. Let's assume for now if mode is edit, we might rely on a prop or context,
-        // but strictly following the current file, we assume `agentId` state captures it after first create.
-        // If passed in "edit" mode, ideally initialData should have ID.
-        // Let's assume for this task, if we created it, we update it.
-
-        if (agentId) {
-          savedAgent = await updateAgent(agentId, payload);
-        } else {
-          // Fallback or potential issue: validation/logic gap if "edit" mode provided but no ID known.
-          // We'll treat "create" as default if no ID.
-          savedAgent = await createAgent(payload);
-        }
+      if (agentId) {
+        savedAgent = await updateAgent(agentId, payload);
       } else {
         savedAgent = await createAgent(payload);
       }
 
       setAgentId(savedAgent.id);
       alert("Agent saved successfully!");
+      return true;
     } catch (error) {
       console.error(error);
       alert("Failed to save agent. Please try again.");
+      return false;
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleStartTestCall = async () => {
+    // 1. Validate phone number
+    if (!testPhone) {
+      alert("Phone number is required for a test call.");
+      return;
+    }
+
+    // 2. Auto-save the agent first if not yet saved
+    if (!agentId) {
+      const saved = await handleSaveAgent();
+      if (!saved) return;
+    }
+
+    // 3. Make the test call
+    setIsTestCalling(true);
+    try {
+      const result = await startTestCall(agentId!, {
+        firstName: testFirstName,
+        lastName: testLastName,
+        gender: testGender,
+        phoneNumber: testPhone,
+      });
+      alert(`Test call started! Call ID: ${result.callId}`);
+    } catch (error) {
+      console.error(error);
+      alert("Failed to start test call. Please try again.");
+    } finally {
+      setIsTestCalling(false);
     }
   };
 
@@ -886,9 +904,16 @@ export function AgentForm({
                     />
                   </div>
 
-                  <Button className="w-full">
-                    <Phone className="mr-2 h-4 w-4" />
-                    Start Test Call
+                  <Button
+                    className="w-full"
+                    onClick={handleStartTestCall}
+                    disabled={isTestCalling || isSubmitting}>
+                    {isTestCalling ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Phone className="mr-2 h-4 w-4" />
+                    )}
+                    {isTestCalling ? "Calling..." : "Start Test Call"}
                   </Button>
                 </div>
               </CardContent>

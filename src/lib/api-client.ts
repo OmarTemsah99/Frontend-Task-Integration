@@ -58,3 +58,35 @@ export async function updateAgent(
 
   return response.json();
 }
+
+export interface TestCallRequest {
+  firstName: string;
+  lastName: string;
+  gender: string;
+  phoneNumber: string;
+}
+
+export interface TestCallResponse {
+  callId: string;
+  status: string;
+  message: string;
+}
+
+export async function startTestCall(
+  agentId: string,
+  data: TestCallRequest,
+): Promise<TestCallResponse> {
+  const response = await fetch(`${API_BASE_URL}/agents/${agentId}/test-call`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to start test call: ${response.statusText}`);
+  }
+
+  return response.json();
+}
