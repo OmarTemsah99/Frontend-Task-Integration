@@ -3,7 +3,7 @@
 import { AgentForm } from "./agent-form";
 import { useAgentById } from "@/hooks/use-api-data";
 import { useSearchParams } from "next/navigation";
-import { Spinner } from "../ui/spinner";
+import { AgentFormSkeleton } from "./agent-form-skeleton";
 import type { AgentFormInitialData } from "./agent-form";
 
 export default function EditAgentContent() {
@@ -23,12 +23,7 @@ export default function EditAgentContent() {
   }
 
   if (loading) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-6">
-        <Spinner />
-        <span className="ml-2 text-muted-foreground">Loading agent...</span>
-      </div>
-    );
+    return <AgentFormSkeleton />;
   }
 
   if (error || !agent) {
