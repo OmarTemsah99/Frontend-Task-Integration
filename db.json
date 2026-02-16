@@ -188,6 +188,28 @@
         "liveTransfer": false
       },
       "id": 3
+    },
+    {
+      "name": "Test Agent 3",
+      "description": "Agent for testing 3",
+      "callType": "outbound",
+      "language": "fr",
+      "voice": "echo",
+      "prompt": "sales",
+      "model": "standard",
+      "latency": 0.5,
+      "speed": 110,
+      "callScript": "fsgdfgsdfgsdfgsdfdsafdsafasd",
+      "serviceDescription": "gsdfhsdfhsdfhsdhfasdfasdfasdfa",
+      "attachments": [
+        6
+      ],
+      "tools": {
+        "allowHangUp": true,
+        "allowCallback": true,
+        "liveTransfer": true
+      },
+      "id": 4
     }
   ],
   "attachments": [
@@ -225,6 +247,13 @@
       "size": 36240,
       "mimeType": "application/pdf",
       "id": 5
+    },
+    {
+      "key": "aa77d067-1f42-41eb-85e2-3ab529a2a461",
+      "name": "OmarTarek_SoftwareDeveloper_CV.pdf",
+      "size": 148464,
+      "mimeType": "application/pdf",
+      "id": 6
     }
   ]
 }
